@@ -70,37 +70,51 @@ private:
 	//
 	int m_nHeightCommand;
 	//
+#define MAX_STR_LEN		100 * 1024 * 1024
+#define CONFIG_FNAME	"config.json"
+#define CURRENT_INDEX	"current_index"
+#define SERVER_LIST		"server_list"
+#define SERVER_DESC		"desc"
+#define SERVER_HOST		"host"
+#define SERVER_PORT		"port"
+#define SERVER_PASS		"pass"
+#define SERVER_SLOT		"slot"
+#define DOC_ALLOCATOR	m_document.GetAllocator()
 
 	void free_redis()
 	{
 		EnterCriticalSection(&m_cslocker);
+		printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 		if ((m_redis_context != NULL) && (m_redis_context->err == 0))
 		{
 			redisFree(m_redis_context);
 			m_redis_context = NULL;
 		}
+		printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 		LeaveCriticalSection(&m_cslocker);
 	}
-	void init_redis()
+	int init_redis()
 	{
+		int ret = (-1);
 		bool isunix = false;
 		//redisContext* redis_context = NULL;
 		redisReply* redis_reply = NULL;
-		const char* hostname = m_host.length() ? m_host.c_str() : "10.0.3.252";
+		const char* host = m_host.length() ? m_host.c_str() : "10.0.3.252";
 		int port = (m_port > 0 && m_port < 65536) ? m_port : 6379;
 		const char* pass = m_pass.length() ? m_pass.c_str() : NULL;
 		int slot = (m_slot >= 0) ? m_slot : (0);
 
 		EnterCriticalSection(&m_cslocker);
+		printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 
 		struct timeval timeout = { 1, 500000 }; // 1.5 seconds
 		if (isunix)
 		{
-			m_redis_context = redisConnectUnixWithTimeout(hostname, timeout);
+			m_redis_context = redisConnectUnixWithTimeout(host, timeout);
 		}
 		else
 		{
-			m_redis_context = redisConnectWithTimeout(hostname, port, timeout);
+			m_redis_context = redisConnectWithTimeout(host, port, timeout);
 		}
 		if ((m_redis_context == NULL) || (m_redis_context->err != 0))
 		{
@@ -116,16 +130,32 @@ private:
 				m_redis_context = NULL;
 			}
 		}
-		if (pass)
+		if (m_redis_context != NULL)
 		{
-			//redis_execute_command((std::string("AUTH ") + pass).c_str());
-			redis_login(pass);
-		}
-		if (slot >= 0)
-		{
-			((CButton*)GetDlgItem(IDC_CHECK_CLUSTER))->SetCheck(redis_select(slot));
+			if (pass)
+			{
+				//redis_execute_command((std::string("AUTH ") + pass).c_str());
+				redis_login(pass);
+			}
+			if (slot >= 0)
+			{
+				((CButton*)GetDlgItem(IDC_CHECK_CLUSTER))->SetCheck(redis_select(slot));
+			}
+
+			ret = 0;
 		}
 		LeaveCriticalSection(&m_cslocker);
+		printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
+
+		CString strText = _T("");
+		GetDlgItem(IDC_EDIT_RESULT)->GetWindowText(strText);
+		if (strText.GetLength() > MAX_STR_LEN)
+		{
+			strText = _T("");
+		}
+		std::string prefix = (const char*)strText + std::string("[") + "connected to " + host + ":" + std::to_string(port) + ((ret ==0)?" success":" failed")  + std::string("]") + std::string("\r\n");
+		GetDlgItem(IDC_EDIT_RESULT)->SetWindowText(prefix.c_str());
+		return ret;
 	}
 	static DWORD redis_status_thread(LPVOID p)
 	{
@@ -137,8 +167,10 @@ private:
 			{
 				if (!thiz->redis_ping())
 				{
-					thiz->redis_reinit();
-					thiz->enable_client(TRUE);
+					if (thiz->redis_reinit() == 0)
+					{
+						thiz->enable_client(TRUE);
+					}
 				}
 				Sleep(3000);
 			}
@@ -268,7 +300,7 @@ private:
 public:
 	void enable_client(BOOL bEnabled)
 	{
-		GetDlgItem(IDC_COMBO_HOST)->EnableWindow(bEnabled);
+		//GetDlgItem(IDC_COMBO_HOST)->EnableWindow(bEnabled);
 		GetDlgItem(IDOK)->EnableWindow(bEnabled);
 		GetDlgItem(IDC_BUTTON_EDITCONF)->EnableWindow(bEnabled);
 		GetDlgItem(IDC_EDIT_COMMAND)->EnableWindow(bEnabled);
@@ -277,17 +309,6 @@ public:
 			((CEdit*)GetDlgItem(IDC_EDIT_COMMAND))->SetFocus();
 		}
 	}
-
-#define MAX_STR_LEN		100 * 1024 * 1024
-#define CONFIG_FNAME	"config.json"
-#define CURRENT_INDEX	"current_index"
-#define SERVER_LIST		"server_list"
-#define SERVER_DESC		"desc"
-#define SERVER_HOST		"host"
-#define SERVER_PORT		"port"
-#define SERVER_PASS		"pass"
-#define SERVER_SLOT		"slot"
-#define DOC_ALLOCATOR	m_document.GetAllocator()
 
 	void init_config()
 	{
@@ -404,19 +425,22 @@ public:
 	{
 		return m_b_running;
 	}
-	void redis_reinit()
+	int redis_reinit()
 	{
 		free_redis();
-		init_redis();
+		return init_redis();
 	}
 	bool redis_ping()
 	{
 		bool result = false;
-		EnterCriticalSection(&m_cslocker);
 		if (m_redis_context != NULL)
 		{
 			// PING server
+			EnterCriticalSection(&m_cslocker);
+			printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 			redisReply* redis_reply = reinterpret_cast<redisReply*>(redisCommand(m_redis_context, "PING"));
+			LeaveCriticalSection(&m_cslocker);
+			printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 			if (redis_reply != NULL)
 			{
 				printf("PING: %s\n", redis_reply->str);
@@ -425,19 +449,21 @@ public:
 				redis_reply = NULL;
 			}
 		}
-		LeaveCriticalSection(&m_cslocker);
 		return result;
 	}
 	bool redis_select(int index)
 	{
 		bool result = false;
-		EnterCriticalSection(&m_cslocker);
 		if (m_redis_context != NULL)
 		{
 			char czCommand[128] = { 0 };
 			snprintf(czCommand, sizeof(czCommand)/sizeof(*czCommand), "SELECT %d", index);
 			// SELECT index
+			EnterCriticalSection(&m_cslocker);
+			printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 			redisReply* redis_reply = reinterpret_cast<redisReply*>(redisCommand(m_redis_context, czCommand));
+			LeaveCriticalSection(&m_cslocker);
+			printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 			if (redis_reply != NULL)
 			{
 				printf("SELECT: %s\n", redis_reply->str);
@@ -446,20 +472,22 @@ public:
 				redis_reply = NULL;
 			}
 		}
-		LeaveCriticalSection(&m_cslocker);
 		return result;
 	}
 
 	bool redis_login(const char * pass)
 	{
 		bool result = false;
-		EnterCriticalSection(&m_cslocker);
 		if (m_redis_context != NULL)
 		{
 			char czCommand[4096] = { 0 };
 			snprintf(czCommand, sizeof(czCommand) / sizeof(*czCommand), "AUTH %s", pass);
 			// AUTH pass
+			EnterCriticalSection(&m_cslocker);
+			printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 			redisReply* redis_reply = reinterpret_cast<redisReply*>(redisCommand(m_redis_context, czCommand));
+			LeaveCriticalSection(&m_cslocker);
+			printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 			if (redis_reply != NULL)
 			{
 				printf("AUTH: %s\n", redis_reply->str);
@@ -468,15 +496,17 @@ public:
 				redis_reply = NULL;
 			}
 		}
-		LeaveCriticalSection(&m_cslocker);
 		return result;
 	}
 	void redis_execute_command(const char * command)
 	{
-		EnterCriticalSection(&m_cslocker);
 		if (m_redis_context != NULL)
 		{
+			EnterCriticalSection(&m_cslocker);
+			printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 			redisReply* redis_reply = reinterpret_cast<redisReply*>(redisCommand(m_redis_context, command));
+			printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
+			LeaveCriticalSection(&m_cslocker);
 			if (redis_reply != NULL)
 			{
 				CString strText = _T("");
@@ -536,7 +566,12 @@ public:
 						{
 							std::string host = temp_node.substr(0, temp_node.find(":"));
 							int port = std::stoi(temp_node.substr(temp_node.find(":") + 1));
+
+							EnterCriticalSection(&m_cslocker);
+							printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
 							redis_login_execute_command(host.c_str(), port, command);
+							LeaveCriticalSection(&m_cslocker);
+							printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 						}
 					}
 				}
@@ -549,7 +584,6 @@ public:
 				redis_reply = NULL;
 			}
 		}
-		LeaveCriticalSection(&m_cslocker);
 	}
 	void redis_login_execute_command(const char * _host, int _port, const char* _command)
 	{
