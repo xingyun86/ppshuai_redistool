@@ -62,6 +62,7 @@ CRedisClusterToolsDlg::CRedisClusterToolsDlg(CWnd* pParent /*=nullptr*/)
 	m_slot = 0;
 	InitializeCriticalSection(&m_cslocker);
 	m_h_redis_thread = INVALID_HANDLE_VALUE;
+	m_nHeightCommand = 0;
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
@@ -75,6 +76,8 @@ BEGIN_MESSAGE_MAP(CRedisClusterToolsDlg, CDialogEx)
 	ON_WM_PAINT()
 	ON_WM_QUERYDRAGICON()
 	ON_CBN_SELCHANGE(IDC_COMBO_HOST, &CRedisClusterToolsDlg::OnCbnSelchangeComboHost)
+	ON_WM_SIZE()
+	ON_BN_CLICKED(IDC_BUTTON_EDITCONF, &CRedisClusterToolsDlg::OnBnClickedButtonEditConf)
 END_MESSAGE_MAP()
 
 
@@ -111,10 +114,12 @@ BOOL CRedisClusterToolsDlg::OnInitDialog()
 
 	// TODO: Add extra initialization here
 	
+	init_ui_text();
+
 	init_config();
 
 	init_redis_status_thread();
-
+	
 	return TRUE;  // return TRUE  unless you set the focus to a control
 }
 
@@ -172,5 +177,57 @@ HCURSOR CRedisClusterToolsDlg::OnQueryDragIcon()
 void CRedisClusterToolsDlg::OnCbnSelchangeComboHost()
 {
 	// TODO: Add your control notification handler code here
+	this->enable_client(FALSE);
 	switch_redis();
+}
+
+
+void CRedisClusterToolsDlg::OnSize(UINT nType, int cx, int cy)
+{
+	CDialogEx::OnSize(nType, cx, cy);
+
+	// TODO: Add your message handler code here
+	if(this->IsWindowVisible())
+	{
+		resize_window();
+	}
+}
+
+void CRedisClusterToolsDlg::OnBnClickedButtonEditConf()
+{
+	// TODO: Add your control notification handler code here
+	this->enable_client(FALSE);
+	STARTUPINFO si = { 0 };
+	PROCESS_INFORMATION pi = { 0 };
+	si.cb = sizeof(si);
+	_TCHAR tzCommandLine[4096] = { 0 };
+	snprintf(tzCommandLine, sizeof(tzCommandLine) / sizeof(*tzCommandLine), _T("notepad %s"), CONFIG_FNAME);
+	// Start the child process. 
+	if (!CreateProcess(NULL,   // No module name (use command line)
+		tzCommandLine,        // Command line
+		NULL,           // Process handle not inheritable
+		NULL,           // Thread handle not inheritable
+		FALSE,          // Set handle inheritance to FALSE
+		0,              // No creation flags
+		NULL,           // Use parent's environment block
+		NULL,           // Use parent's starting directory 
+		&si,            // Pointer to STARTUPINFO structure
+		&pi)           // Pointer to PROCESS_INFORMATION structure
+		)
+	{
+		printf("CreateProcess failed (%d).\n", GetLastError());
+	}
+	else
+	{
+		// Wait until child process exits.
+		WaitForSingleObject(pi.hProcess, INFINITE);
+
+		// Close process and thread handles. 
+		CloseHandle(pi.hProcess);
+		CloseHandle(pi.hThread);
+		
+		// Reload
+		init_config();
+	}
+	this->enable_client(TRUE);
 }

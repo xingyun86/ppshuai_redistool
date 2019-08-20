@@ -9,6 +9,7 @@
 #define IDR_MAINFRAME                   128
 #define IDC_COMBO_HOST                  1002
 #define IDC_CHECK_CLUSTER               1003
+#define IDC_BUTTON_EDITCONF             1004
 #define IDC_EDIT_COMMAND                1005
 #define IDC_STATIC_COMMAND              1006
 #define IDC_STATIC_HOST                 1007
