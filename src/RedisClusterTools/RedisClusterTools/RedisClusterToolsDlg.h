@@ -19,6 +19,12 @@ public:
 	enum { IDD = IDD_REDISCLUSTERTOOLS_DIALOG };
 #endif
 
+	typedef enum THREAD_STATUS {
+		TSTYPE_NULLPTR = 0,
+		TSTYPE_STARTED,
+		TSTYPE_STOPPED,
+	}THREAD_STATUS;
+
 protected:
 	virtual void DoDataExchange(CDataExchange* pDX);	// DDX/DDV support
 
@@ -39,11 +45,35 @@ protected:
 		((CEdit*)GetDlgItem(IDC_EDIT_COMMAND))->SetFocus();
 	}
 	virtual void OnCancel() {
-		set_running(false);
-		WaitForSingleObject(m_h_redis_thread, INFINITE);
+		set_running(TSTYPE_NULLPTR);
+		
+		while (!is_stopped())
+		{
+			//switch (WaitForSingleObject(m_h_redis_thread, WAIT_TIMEOUT))
+			//{
+			//case WAIT_TIMEOUT:
+			{
+				//wait timeout continue
+				Sleep(WAIT_TIMEOUT);
+			}
+			//break;
+			//case WAIT_OBJECT_0:
+			//default:
+			//{
+			//	goto __LEAVE_CLEAN__;
+			//}
+			//break;
+			//}
+		}
+
+	__LEAVE_CLEAN__:
+
 		CloseHandle(m_h_redis_thread);
 		m_h_redis_thread = INVALID_HANDLE_VALUE;
 		free_redis();
+		
+		DeleteCriticalSection(&m_cslocker);
+
 		EndDialog(IDCANCEL);
 	}
 	virtual BOOL OnInitDialog();
@@ -53,10 +83,11 @@ protected:
 	afx_msg void OnCbnSelchangeComboHost();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnBnClickedButtonEditConf();
+	afx_msg void OnBnClickedButtonClearResult();
 	DECLARE_MESSAGE_MAP()
 
 private:
-	bool m_b_running;
+	THREAD_STATUS m_n_running;
 	rapidjson::Document m_document;
 	redisContext* m_redis_context;
 	CRITICAL_SECTION m_cslocker;
@@ -162,19 +193,23 @@ private:
 		CRedisClusterToolsDlg* thiz = reinterpret_cast<CRedisClusterToolsDlg*>(p);
 		if (thiz)
 		{
-			thiz->set_running(true);
+			thiz->set_running(TSTYPE_STARTED);
 			while (thiz->is_running())
 			{
+				printf("I am alive1!!\n");
 				if (!thiz->redis_ping())
 				{
+					printf("I am alive2!!\n");
 					if (thiz->redis_reinit() == 0)
 					{
+						printf("I am alive!!\n");
 						thiz->enable_client(TRUE);
 					}
 				}
 				Sleep(3000);
+				printf("I am alive3!!\n");
 			}
-			thiz->set_running(false);
+			thiz->set_running(TSTYPE_STOPPED);
 		}
 		return 0;
 	}
@@ -191,6 +226,7 @@ private:
 		SetDlgItemText(IDC_STATIC_RESULT, _T("执行结果:"));
 
 		SetDlgItemText(IDOK, _T("运行命令"));
+		SetDlgItemText(IDC_BUTTON_CLEARRESULT, _T("清空输出"));
 		SetDlgItemText(IDC_BUTTON_EDITCONF, _T("编辑配置"));
 		SetDlgItemText(IDCANCEL, _T("关闭程序"));
 
@@ -242,6 +278,13 @@ private:
 		rcClient.right = rcClient.left + rcMiddle.right;
 		rcClient.bottom = rcClient.top + rcMiddle.bottom;
 		GetDlgItem(IDOK)->MoveWindow(&rcClient, FALSE);
+
+		GetDlgItem(IDC_BUTTON_CLEARRESULT)->GetClientRect(&rcMiddle);
+		rcClient.left = rcClient.right + H_SPACES;
+		rcClient.top = V_BORDER;
+		rcClient.right = rcClient.left + rcMiddle.right;
+		rcClient.bottom = rcClient.top + rcMiddle.bottom;
+		GetDlgItem(IDC_BUTTON_CLEARRESULT)->MoveWindow(&rcClient, FALSE);
 
 		GetDlgItem(IDC_BUTTON_EDITCONF)->GetClientRect(&rcMiddle);
 		rcClient.left = rcClient.right + H_SPACES;
@@ -302,7 +345,8 @@ public:
 	{
 		//GetDlgItem(IDC_COMBO_HOST)->EnableWindow(bEnabled);
 		GetDlgItem(IDOK)->EnableWindow(bEnabled);
-		GetDlgItem(IDC_BUTTON_EDITCONF)->EnableWindow(bEnabled);
+		//GetDlgItem(IDC_BUTTON_CLEARRESULT)->EnableWindow(bEnabled);
+		//GetDlgItem(IDC_BUTTON_EDITCONF)->EnableWindow(bEnabled);
 		GetDlgItem(IDC_EDIT_COMMAND)->EnableWindow(bEnabled);
 		if (bEnabled)
 		{
@@ -316,6 +360,8 @@ public:
 		char* current_index = NULL;
 		std::string f_data = "";
 		long f_size = 0;
+
+		this->enable_client(FALSE);
 
 		FILE* p = fopen(CONFIG_FNAME, "rb");
 		if (p)
@@ -332,63 +378,64 @@ public:
 		if (f_size <= 0)
 		{
 			printf("%s is empty!\n", CONFIG_FNAME);
-			return;
 		}
-
-		m_host = "";
-		m_port = 0;
-		m_pass = "";
-		m_slot = 0;
-
-		if (m_document.IsObject())
+		else
 		{
-			if (m_document.HasMember(CURRENT_INDEX) && m_document[CURRENT_INDEX].GetType() == rapidjson::kStringType)
+			m_host = "";
+			m_port = 0;
+			m_pass = "";
+			m_slot = 0;
+
+			if (m_document.IsObject())
 			{
-				current_index = (char*)m_document[CURRENT_INDEX].GetString();
+				if (m_document.HasMember(CURRENT_INDEX) && m_document[CURRENT_INDEX].GetType() == rapidjson::kStringType)
+				{
+					current_index = (char*)m_document[CURRENT_INDEX].GetString();
+				}
 			}
-		}
-		else
-		{
-			m_document.SetObject();
-		}
-		if (m_document.Parse(f_data.c_str()).HasParseError())
-		{
-			printf("config.json format error!\n");
-		}
-		else
-		{
-			if (m_document.HasMember(SERVER_LIST) && m_document[SERVER_LIST].GetType() == rapidjson::kArrayType)
+			else
 			{
-				((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->ResetContent();
+				m_document.SetObject();
+			}
+			if (m_document.Parse(f_data.c_str()).HasParseError())
+			{
+				printf("config.json format error!\n");
+			}
+			else
+			{
+				if (m_document.HasMember(SERVER_LIST) && m_document[SERVER_LIST].GetType() == rapidjson::kArrayType)
+				{
+					((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->ResetContent();
 
-				if (m_document.HasMember(CURRENT_INDEX))
-				{
-					m_document.RemoveMember(CURRENT_INDEX);
-				}
-				m_document.AddMember(CURRENT_INDEX, "", DOC_ALLOCATOR);
-				rapidjson::Value& server_list = m_document[SERVER_LIST];
-				for (rapidjson::SizeType i = 0; i < server_list.Size(); i++)
-				{
-					rapidjson::Value& server_item = server_list[i];
-					if (server_item.HasMember(SERVER_DESC) && server_item[SERVER_DESC].GetType() == rapidjson::kStringType)
+					if (m_document.HasMember(CURRENT_INDEX))
 					{
-						if (current_index && !strcmp(current_index, server_item[SERVER_DESC].GetString()))
-						{
-							m_document[CURRENT_INDEX].SetString(current_index, DOC_ALLOCATOR);
-							n_current_index = ((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount();
-						}
-						((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->InsertString(((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount(), server_item[SERVER_DESC].GetString());
+						m_document.RemoveMember(CURRENT_INDEX);
 					}
-				}
-				
-				if (server_list.Size() > 0)
-				{
-					m_host = m_document[SERVER_LIST][n_current_index][SERVER_HOST].GetString();
-					m_port = m_document[SERVER_LIST][n_current_index][SERVER_PORT].GetInt();
-					m_pass = m_document[SERVER_LIST][n_current_index][SERVER_PASS].GetString();
-					m_slot = m_document[SERVER_LIST][n_current_index][SERVER_SLOT].GetInt();
-					m_document[CURRENT_INDEX].SetString(current_index ? current_index : m_document[SERVER_LIST][n_current_index][SERVER_DESC].GetString(), DOC_ALLOCATOR);
-					((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->SetCurSel(n_current_index);
+					m_document.AddMember(CURRENT_INDEX, "", DOC_ALLOCATOR);
+					rapidjson::Value& server_list = m_document[SERVER_LIST];
+					for (rapidjson::SizeType i = 0; i < server_list.Size(); i++)
+					{
+						rapidjson::Value& server_item = server_list[i];
+						if (server_item.HasMember(SERVER_DESC) && server_item[SERVER_DESC].GetType() == rapidjson::kStringType)
+						{
+							if (current_index && !strcmp(current_index, server_item[SERVER_DESC].GetString()))
+							{
+								m_document[CURRENT_INDEX].SetString(current_index, DOC_ALLOCATOR);
+								n_current_index = ((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount();
+							}
+							((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->InsertString(((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount(), server_item[SERVER_DESC].GetString());
+						}
+					}
+
+					if (server_list.Size() > 0)
+					{
+						m_host = m_document[SERVER_LIST][n_current_index][SERVER_HOST].GetString();
+						m_port = m_document[SERVER_LIST][n_current_index][SERVER_PORT].GetInt();
+						m_pass = m_document[SERVER_LIST][n_current_index][SERVER_PASS].GetString();
+						m_slot = m_document[SERVER_LIST][n_current_index][SERVER_SLOT].GetInt();
+						m_document[CURRENT_INDEX].SetString(current_index ? current_index : m_document[SERVER_LIST][n_current_index][SERVER_DESC].GetString(), DOC_ALLOCATOR);
+						((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->SetCurSel(n_current_index);
+					}
 				}
 			}
 		}
@@ -417,13 +464,17 @@ public:
 			}
 		}
 	}
-	void set_running(bool b_running)
+	void set_running(THREAD_STATUS n_running)
 	{
-		m_b_running = b_running;
+		m_n_running = n_running;
 	}
 	bool is_running()
 	{
-		return m_b_running;
+		return (m_n_running == TSTYPE_STARTED);
+	}
+	bool is_stopped()
+	{
+		return (m_n_running == TSTYPE_STOPPED);
 	}
 	int redis_reinit()
 	{
@@ -726,4 +777,5 @@ public:
 			redis_context = NULL;
 		}
 	}
+
 };

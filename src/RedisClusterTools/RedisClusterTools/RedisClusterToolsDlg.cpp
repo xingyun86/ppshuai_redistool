@@ -53,7 +53,7 @@ END_MESSAGE_MAP()
 CRedisClusterToolsDlg::CRedisClusterToolsDlg(CWnd* pParent /*=nullptr*/)
 	: CDialogEx(IDD_REDISCLUSTERTOOLS_DIALOG, pParent)
 {
-	m_b_running = false;
+	m_n_running = TSTYPE_NULLPTR;
 	m_redis_context = NULL;
 	m_dw_redis_thread = 0;
 	m_host = "";
@@ -78,6 +78,7 @@ BEGIN_MESSAGE_MAP(CRedisClusterToolsDlg, CDialogEx)
 	ON_CBN_SELCHANGE(IDC_COMBO_HOST, &CRedisClusterToolsDlg::OnCbnSelchangeComboHost)
 	ON_WM_SIZE()
 	ON_BN_CLICKED(IDC_BUTTON_EDITCONF, &CRedisClusterToolsDlg::OnBnClickedButtonEditConf)
+	ON_BN_CLICKED(IDC_BUTTON_CLEARRESULT, &CRedisClusterToolsDlg::OnBnClickedButtonClearResult)
 END_MESSAGE_MAP()
 
 
@@ -230,4 +231,11 @@ void CRedisClusterToolsDlg::OnBnClickedButtonEditConf()
 		init_config();
 	}
 	this->enable_client(TRUE);
+}
+
+
+void CRedisClusterToolsDlg::OnBnClickedButtonClearResult()
+{
+	// TODO: Add your control notification handler code here
+	GetDlgItem(IDC_EDIT_RESULT)->SetWindowText(("[Connected to " + std::string(m_host) + ":" + std::to_string(m_port) + "]\r\n").c_str());
 }
