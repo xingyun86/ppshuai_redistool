@@ -5,7 +5,7 @@
 #pragma once
 
 #include <hiredis.h>
-
+#include <thread>
 
 // CRedisClusterToolsDlg dialog
 class CRedisClusterToolsDlg : public CDialogEx
@@ -39,14 +39,34 @@ protected:
 		GetDlgItem(IDC_EDIT_COMMAND)->GetWindowText(str);
 		if (str.GetLength())
 		{
-			redis_execute_command((const char*)str);
-			((CEdit *)GetDlgItem(IDC_EDIT_RESULT))->LineScroll(((CEdit*)GetDlgItem(IDC_EDIT_RESULT))->GetLineCount());
+			std::string key = "\r\n";
+			std::size_t start = 0;
+			std::size_t final = std::string::npos;
+			std::string s = (const char*)str;
+			while ((final = s.find(key, start)) != std::string::npos)
+			{
+				redis_execute_command(s.substr(start, final - start).c_str());
+				start = final + key.length();
+			}
+			if (start < s.length())
+			{
+				redis_execute_command(s.substr(start).c_str());
+			}
+			((CEdit*)GetDlgItem(IDC_EDIT_RESULT))->LineScroll(((CEdit*)GetDlgItem(IDC_EDIT_RESULT))->GetLineCount());
 		}
 		((CEdit*)GetDlgItem(IDC_EDIT_COMMAND))->SetFocus();
 	}
 	virtual void OnCancel() {
 		set_running(TSTYPE_NULLPTR);
-		
+		if (m_timetask_thread != nullptr)
+		{
+			m_timetask_thread_status = false;
+			if (m_timetask_thread->joinable())
+			{
+				m_timetask_thread->join();
+			}
+			m_timetask_thread = nullptr;
+		}
 		while (!is_stopped())
 		{
 			//switch (WaitForSingleObject(m_h_redis_thread, WAIT_TIMEOUT))
@@ -81,9 +101,11 @@ protected:
 	afx_msg void OnPaint();
 	afx_msg HCURSOR OnQueryDragIcon();
 	afx_msg void OnCbnSelchangeComboHost();
+	afx_msg void OnCbnSelchangeComboShotcutCommand();
 	afx_msg void OnSize(UINT nType, int cx, int cy);
 	afx_msg void OnBnClickedButtonEditConf();
 	afx_msg void OnBnClickedButtonClearResult();
+	afx_msg void OnBnClickedCheckTimeTask();
 	DECLARE_MESSAGE_MAP()
 
 private:
@@ -97,19 +119,27 @@ private:
 	int m_port;
 	std::string m_pass;
 	int m_slot;
-
+	int m_timetask_timeout;
+	bool m_timetask_thread_status;
+	std::shared_ptr<std::thread> m_timetask_thread;
 	//
 	int m_nHeightCommand;
 	//
-#define MAX_STR_LEN		100 * 1024 * 1024
-#define CONFIG_FNAME	"config.json"
-#define CURRENT_INDEX	"current_index"
-#define SERVER_LIST		"server_list"
-#define SERVER_DESC		"desc"
-#define SERVER_HOST		"host"
-#define SERVER_PORT		"port"
-#define SERVER_PASS		"pass"
-#define SERVER_SLOT		"slot"
+#define MAX_STR_LEN			100 * 1024 * 1024
+#define CONFIG_FNAME		"config.json"
+
+#define TIMETASK_TIMEOUT	"timetask_timeout"
+#define CURRENT_INDEX		"current_index"
+#define SERVER_LIST			"server_list"
+#define SERVER_DESC			"desc"
+#define SERVER_HOST			"host"
+#define SERVER_PORT			"port"
+#define SERVER_PASS			"pass"
+#define SERVER_SLOT			"slot"
+#define SERVER_CMDS			"cmds"
+#define SERVER_CMDS_CMD		"cmd"
+#define SERVER_CMDS_DESC	"desc"
+
 #define DOC_ALLOCATOR	m_document.GetAllocator()
 
 	void free_redis()
@@ -196,18 +226,14 @@ private:
 			thiz->set_running(TSTYPE_STARTED);
 			while (thiz->is_running())
 			{
-				printf("I am alive1!!\n");
 				if (!thiz->redis_ping())
 				{
-					printf("I am alive2!!\n");
 					if (thiz->redis_reinit() == 0)
 					{
-						printf("I am alive!!\n");
 						thiz->enable_client(TRUE);
 					}
 				}
 				Sleep(3000);
-				printf("I am alive3!!\n");
 			}
 			thiz->set_running(TSTYPE_STOPPED);
 		}
@@ -222,6 +248,7 @@ private:
 		SetWindowText(_T("Redis命令行管理工具(支持集群)[xingyun86]"));
 		SetDlgItemText(IDC_STATIC_COMMAND, _T("命令行:"));
 		SetDlgItemText(IDC_CHECK_CLUSTER, _T("集群"));
+		SetDlgItemText(IDC_CHECK_TIMETASK, _T("定时刷新"));
 		SetDlgItemText(IDC_STATIC_HOST, _T("服务器地址:"));
 		SetDlgItemText(IDC_STATIC_RESULT, _T("执行结果:"));
 
@@ -310,6 +337,20 @@ private:
 		rcClient.bottom = rcClient.top + rcMiddle.bottom;
 		GetDlgItem(IDC_STATIC_COMMAND)->MoveWindow(&rcClient, FALSE);
 
+		GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND)->GetClientRect(&rcMiddle);
+		rcClient.left = rcClient.right + H_SPACES;
+		rcClient.top = rcClient.top;
+		rcClient.right = rcClient.left + rcMiddle.right;
+		rcClient.bottom = rcClient.top + rcMiddle.bottom;
+		GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND)->MoveWindow(&rcClient, FALSE);
+
+		GetDlgItem(IDC_CHECK_TIMETASK)->GetClientRect(&rcMiddle);
+		rcClient.left = rcClient.right + H_SPACES;
+		rcClient.top = rcClient.top;
+		rcClient.right = rcClient.left + rcMiddle.right;
+		rcClient.bottom = rcClient.top + rcMiddle.bottom;
+		GetDlgItem(IDC_CHECK_TIMETASK)->MoveWindow(&rcClient, FALSE);
+
 		GetDlgItem(IDC_EDIT_COMMAND)->GetClientRect(&rcMiddle);
 		rcClient.left = H_BORDER;
 		rcClient.top = rcClient.bottom + V_SPACES;
@@ -341,6 +382,18 @@ private:
 	}
 
 public:
+	void timetask_timeout(int timetask_timeout) {
+		this->m_timetask_timeout = timetask_timeout;
+	}
+	int timetask_timeout() {
+		return this->m_timetask_timeout;
+	}
+	void timetask_thread_status(bool timetask_thread_status) {
+		this->m_timetask_thread_status = timetask_thread_status;
+	}
+	bool timetask_thread_status() {
+		return this->m_timetask_thread_status;
+	}
 	void enable_client(BOOL bEnabled)
 	{
 		//GetDlgItem(IDC_COMBO_HOST)->EnableWindow(bEnabled);
@@ -358,8 +411,12 @@ public:
 	{
 		int n_current_index = 0;
 		char* current_index = NULL;
+		int n_current_cmd_index = 0;
+		char* current_cmd_index = NULL;
 		std::string f_data = "";
 		long f_size = 0;
+		
+		this->m_timetask_timeout = 1000;
 
 		this->enable_client(FALSE);
 
@@ -391,6 +448,13 @@ public:
 				if (m_document.HasMember(CURRENT_INDEX) && m_document[CURRENT_INDEX].GetType() == rapidjson::kStringType)
 				{
 					current_index = (char*)m_document[CURRENT_INDEX].GetString();
+					if (m_document.HasMember(SERVER_LIST) && m_document[SERVER_LIST].GetType() == rapidjson::kArrayType &&
+						m_document[SERVER_LIST].Size() > std::stoul(current_index) &&
+						m_document[SERVER_LIST][current_index].HasMember(CURRENT_INDEX) &&
+						m_document[SERVER_LIST][current_index][CURRENT_INDEX].GetType() == rapidjson::kStringType)
+					{
+						current_cmd_index = (char*)m_document[SERVER_LIST][current_index][CURRENT_INDEX].GetString();
+					}
 				}
 			}
 			else
@@ -403,6 +467,10 @@ public:
 			}
 			else
 			{
+				if (m_document.HasMember(TIMETASK_TIMEOUT) && m_document[TIMETASK_TIMEOUT].GetType() == rapidjson::kNumberType)
+				{
+					this->m_timetask_timeout = m_document[TIMETASK_TIMEOUT].GetInt();
+				}
 				if (m_document.HasMember(SERVER_LIST) && m_document[SERVER_LIST].GetType() == rapidjson::kArrayType)
 				{
 					((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->ResetContent();
@@ -424,6 +492,12 @@ public:
 								n_current_index = ((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount();
 							}
 							((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->InsertString(((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCount(), server_item[SERVER_DESC].GetString());
+						
+							if (server_item.HasMember(CURRENT_INDEX))
+							{
+								server_item.RemoveMember(CURRENT_INDEX);
+							}
+							server_item.AddMember(CURRENT_INDEX, "", DOC_ALLOCATOR);
 						}
 					}
 
@@ -435,6 +509,36 @@ public:
 						m_slot = m_document[SERVER_LIST][n_current_index][SERVER_SLOT].GetInt();
 						m_document[CURRENT_INDEX].SetString(current_index ? current_index : m_document[SERVER_LIST][n_current_index][SERVER_DESC].GetString(), DOC_ALLOCATOR);
 						((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->SetCurSel(n_current_index);
+
+						if (m_document[SERVER_LIST][n_current_index].HasMember(SERVER_CMDS) && 
+							m_document[SERVER_LIST][n_current_index][SERVER_CMDS].GetType() == rapidjson::kArrayType)
+						{
+							((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->ResetContent();
+							rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][n_current_index][SERVER_CMDS];
+							if (shotcutcommand_list.Size() > 0)
+							{
+								for (rapidjson::SizeType j = 0; j < shotcutcommand_list.Size(); j++)
+								{
+									rapidjson::Value& shotcutcommand_item = shotcutcommand_list[j];
+									if (shotcutcommand_item.HasMember(SERVER_CMDS_CMD) && shotcutcommand_item[SERVER_CMDS_CMD].GetType() == rapidjson::kStringType &&
+										shotcutcommand_item.HasMember(SERVER_CMDS_DESC) && shotcutcommand_item[SERVER_CMDS_DESC].GetType() == rapidjson::kStringType)
+									{
+										if (current_cmd_index && !strcmp(current_cmd_index, shotcutcommand_item[SERVER_CMDS_DESC].GetString()))
+										{
+											m_document[SERVER_LIST][n_current_index][CURRENT_INDEX].SetString(current_cmd_index, DOC_ALLOCATOR);
+											n_current_cmd_index = ((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCount();
+										}
+										((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->InsertString(
+											((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCount(),
+											shotcutcommand_item[SERVER_CMDS_DESC].GetString());
+									}
+								}
+
+								m_document[SERVER_LIST][n_current_index][CURRENT_INDEX].SetString(current_cmd_index ? current_cmd_index : m_document[SERVER_LIST][n_current_index][SERVER_CMDS][n_current_cmd_index][SERVER_CMDS_DESC].GetString(), DOC_ALLOCATOR);
+								((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->SetCurSel(n_current_cmd_index);
+								SetDlgItemText(IDC_EDIT_COMMAND, m_document[SERVER_LIST][n_current_index][SERVER_CMDS][n_current_cmd_index][SERVER_CMDS_CMD].GetString());
+							}
+						}
 					}
 				}
 			}
@@ -442,12 +546,14 @@ public:
 	}
 	void switch_redis()
 	{
+		int n_current_index = 0;
 		CString strCurrentIndex;
 		((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetLBText(((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel(), strCurrentIndex);
+
 		rapidjson::Value& server_list = m_document[SERVER_LIST];
-		for (rapidjson::SizeType i = 0; i < server_list.Size(); i++)
+		//for (rapidjson::SizeType i = 0; i < server_list.Size(); i++)
 		{
-			rapidjson::Value& server_item = server_list[i];
+			rapidjson::Value& server_item = server_list[((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()];
 			if (server_item.HasMember(SERVER_DESC) && server_item[SERVER_DESC].GetType() == rapidjson::kStringType)
 			{
 				if (!strcmp((const char *)strCurrentIndex, server_item[SERVER_DESC].GetString()))
@@ -458,6 +564,50 @@ public:
 					m_port = server_item[SERVER_PORT].GetInt();
 					m_pass = server_item[SERVER_PASS].GetString();
 					m_slot = server_item[SERVER_SLOT].GetInt();
+					if (m_document[SERVER_LIST][n_current_index].HasMember(SERVER_CMDS) &&
+						m_document[SERVER_LIST][n_current_index][SERVER_CMDS].GetType() == rapidjson::kArrayType)
+					{
+						((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->ResetContent();
+						rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][n_current_index][SERVER_CMDS];
+						if (shotcutcommand_list.Size() > 0)
+						{
+							for (rapidjson::SizeType j = 0; j < shotcutcommand_list.Size(); j++)
+							{
+								rapidjson::Value& shotcutcommand_item = shotcutcommand_list[j];
+								if (shotcutcommand_item.HasMember(SERVER_CMDS_CMD) && shotcutcommand_item[SERVER_CMDS_CMD].GetType() == rapidjson::kStringType &&
+									shotcutcommand_item.HasMember(SERVER_CMDS_DESC) && shotcutcommand_item[SERVER_CMDS_DESC].GetType() == rapidjson::kStringType)
+								{
+									((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->InsertString(
+										((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCount(),
+										shotcutcommand_item[SERVER_CMDS_DESC].GetString());
+								}
+							}
+
+							((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->SetCurSel(0);
+							SetDlgItemText(IDC_EDIT_COMMAND, m_document[SERVER_LIST][n_current_index][SERVER_CMDS][0][SERVER_CMDS_CMD].GetString());
+						}
+					}
+					//init_redis();
+					//break;
+				}
+				n_current_index++;
+			}
+		}
+	}
+	void switch_cmd()
+	{
+		CString strCurrentIndex;
+		((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetLBText(((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCurSel(), strCurrentIndex);
+		rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()][SERVER_CMDS];
+		for (rapidjson::SizeType i = 0; i < shotcutcommand_list.Size(); i++)
+		{
+			rapidjson::Value& shotcutcommand_item = shotcutcommand_list[i];
+			if (shotcutcommand_item.HasMember(SERVER_CMDS_DESC) && shotcutcommand_item[SERVER_CMDS_DESC].GetType() == rapidjson::kStringType)
+			{
+				if (!strcmp((const char*)strCurrentIndex, shotcutcommand_item[SERVER_CMDS_DESC].GetString()))
+				{
+					m_document[SERVER_LIST][((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()][CURRENT_INDEX].SetString(strCurrentIndex, DOC_ALLOCATOR);
+					SetDlgItemText(IDC_EDIT_COMMAND, shotcutcommand_item[SERVER_CMDS_CMD].GetString());
 					//init_redis();
 					break;
 				}
@@ -777,5 +927,4 @@ public:
 			redis_context = NULL;
 		}
 	}
-
 };

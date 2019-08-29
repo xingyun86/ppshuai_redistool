@@ -254,6 +254,7 @@
     <ResourceCompile Include="RedisClusterTools.rc" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="config.json" />
     <None Include="res\RedisClusterTools.rc2" />
   </ItemGroup>
   <ItemGroup>

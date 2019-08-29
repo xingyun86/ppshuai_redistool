@@ -1,18 +1,35 @@
 {
+  "timetask_timeout": 3000,
   "server_list": [
     {
       "desc": "10.211.55.4:6379",
       "host": "10.211.55.4",
       "port": 6379,
       "pass": "",
-      "slot": 1
+      "slot": 1,
+      "cmds": [
+        {
+          "desc": "get foo111",
+          "cmd": "get foo\r\nset foo 123455\r\n"
+        },
+        {
+          "desc": "get foo22",
+          "cmd": "get foo222"
+        }
+      ]
     },
     {
       "desc": "10.0.1.20:7000",
       "host": "10.0.1.20",
       "port": 7000,
       "pass": "phxUXkvaA4YfS8Cm",
-      "slot": 1
+      "slot": 1,
+      "cmds": [
+        {
+          "desc": "get foo",
+          "cmd": "get foo"
+        }
+      ]
     }
   ]
 }

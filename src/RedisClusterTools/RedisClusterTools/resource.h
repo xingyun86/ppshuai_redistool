@@ -15,7 +15,9 @@
 #define IDC_STATIC_HOST                 1007
 #define IDC_EDIT_RESULT                 1008
 #define IDC_STATIC_RESULT               1009
-#define IDC_BUTTON_CLEARRESULT	        1010
+#define IDC_BUTTON_CLEARRESULT          1010
+#define IDC_COMBO_SHOTCUTCOMMAND        1011
+#define IDC_CHECK_TIMETASK              1012
 
 // Next default values for new objects
 // 

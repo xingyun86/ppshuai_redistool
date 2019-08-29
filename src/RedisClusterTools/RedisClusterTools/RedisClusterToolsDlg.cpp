@@ -63,6 +63,9 @@ CRedisClusterToolsDlg::CRedisClusterToolsDlg(CWnd* pParent /*=nullptr*/)
 	InitializeCriticalSection(&m_cslocker);
 	m_h_redis_thread = INVALID_HANDLE_VALUE;
 	m_nHeightCommand = 0;
+	m_timetask_thread = nullptr;
+	m_timetask_thread_status = false;
+	m_timetask_timeout = 0;
 	m_hIcon = AfxGetApp()->LoadIcon(IDR_MAINFRAME);
 }
 
@@ -79,6 +82,8 @@ BEGIN_MESSAGE_MAP(CRedisClusterToolsDlg, CDialogEx)
 	ON_WM_SIZE()
 	ON_BN_CLICKED(IDC_BUTTON_EDITCONF, &CRedisClusterToolsDlg::OnBnClickedButtonEditConf)
 	ON_BN_CLICKED(IDC_BUTTON_CLEARRESULT, &CRedisClusterToolsDlg::OnBnClickedButtonClearResult)
+	ON_CBN_SELCHANGE(IDC_COMBO_SHOTCUTCOMMAND, &CRedisClusterToolsDlg::OnCbnSelchangeComboShotcutCommand)
+	ON_BN_CLICKED(IDC_CHECK_TIMETASK, &CRedisClusterToolsDlg::OnBnClickedCheckTimeTask)
 END_MESSAGE_MAP()
 
 
@@ -182,6 +187,13 @@ void CRedisClusterToolsDlg::OnCbnSelchangeComboHost()
 	switch_redis();
 }
 
+void CRedisClusterToolsDlg::OnCbnSelchangeComboShotcutCommand()
+{
+	// TODO: Add your control notification handler code here
+	//this->enable_client(FALSE);
+	//[][SERVER_CMDS_CMD];
+	switch_cmd();
+}
 
 void CRedisClusterToolsDlg::OnSize(UINT nType, int cx, int cy)
 {
@@ -238,4 +250,36 @@ void CRedisClusterToolsDlg::OnBnClickedButtonClearResult()
 {
 	// TODO: Add your control notification handler code here
 	GetDlgItem(IDC_EDIT_RESULT)->SetWindowText(("[Connected to " + std::string(m_host) + ":" + std::to_string(m_port) + "]\r\n").c_str());
+}
+
+void CRedisClusterToolsDlg::OnBnClickedCheckTimeTask()
+{
+	// TODO: Add your control notification handler code here
+	if (m_timetask_thread != nullptr)
+	{
+		m_timetask_thread_status = false;
+		if (m_timetask_thread->joinable())
+		{
+			m_timetask_thread->join();
+		}
+		m_timetask_thread = nullptr;
+		GetDlgItem(IDC_COMBO_HOST)->EnableWindow(TRUE);
+	}
+	else
+	{
+		GetDlgItem(IDC_COMBO_HOST)->EnableWindow(FALSE);
+		m_timetask_thread = std::make_shared<std::thread>([](void * p) {
+			CRedisClusterToolsDlg* thiz = reinterpret_cast<CRedisClusterToolsDlg*>(p);
+			if (thiz)
+			{
+				thiz->timetask_thread_status(true);
+				while (thiz->timetask_thread_status())
+				{
+					thiz->SetDlgItemText(IDC_EDIT_RESULT, _T(""));
+					thiz->OnOK();
+					Sleep(thiz->timetask_timeout());
+				}
+			}
+			}, this);
+	}
 }
