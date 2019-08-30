@@ -7,6 +7,8 @@
 #include <hiredis.h>
 #include <thread>
 
+#define WM_USER_NOTIFY	WM_USER+WM_NOTIFY+1
+
 // CRedisClusterToolsDlg dialog
 class CRedisClusterToolsDlg : public CDialogEx
 {
@@ -18,6 +20,23 @@ public:
 #ifdef AFX_DESIGN_TIME
 	enum { IDD = IDD_REDISCLUSTERTOOLS_DIALOG };
 #endif
+
+#define MAX_STR_LEN			100 * 1024 * 1024
+#define CONFIG_FNAME		"config.json"
+
+#define TIMETASK_TIMEOUT	"timetask_timeout"
+#define CURRENT_INDEX		"current_index"
+#define SERVER_LIST			"server_list"
+#define SERVER_DESC			"desc"
+#define SERVER_HOST			"host"
+#define SERVER_PORT			"port"
+#define SERVER_PASS			"pass"
+#define SERVER_SLOT			"slot"
+#define SERVER_CMDS			"cmds"
+#define SERVER_CMDS_CMD		"cmd"
+#define SERVER_CMDS_DESC	"desc"
+
+#define DOC_ALLOCATOR	m_document.GetAllocator()
 
 	typedef enum THREAD_STATUS {
 		TSTYPE_NULLPTR = 0,
@@ -36,8 +55,12 @@ protected:
 	// Generated message map functions
 	virtual void OnOK() {
 		CString str;
+		if (((CButton*)GetDlgItem(IDC_CHECK_CLEARRESULT))->GetCheck() == BST_CHECKED)
+		{
+			SetDlgItemText(IDC_EDIT_RESULT, _T(""));
+		}
 		GetDlgItem(IDC_EDIT_COMMAND)->GetWindowText(str);
-		if (str.GetLength())
+		if (str.GetLength() > 0)
 		{
 			std::string key = "\r\n";
 			std::size_t start = 0;
@@ -106,6 +129,43 @@ protected:
 	afx_msg void OnBnClickedButtonEditConf();
 	afx_msg void OnBnClickedButtonClearResult();
 	afx_msg void OnBnClickedCheckTimeTask();
+	afx_msg LRESULT OnUserNotify(WPARAM wParam, LPARAM lParam)
+	{
+		switch (wParam)
+		{
+		case 0:
+		{
+			((CButton*)GetDlgItem(IDC_CHECK_CLUSTER))->SetCheck((BOOL)lParam);
+		}
+		break;
+		case 1:
+		{
+			CString strText = _T("");
+			GetDlgItem(IDC_EDIT_RESULT)->GetWindowText(strText);
+			if (strText.GetLength() > MAX_STR_LEN)
+			{
+				strText = _T("");
+			}
+			std::string prefix = (const char*)strText + std::string("[") + "connected to " + m_host + ":" + std::to_string(m_port) + ((((int)lParam) == 0) ? " success" : " failed") + std::string("]") + std::string("\r\n");
+			GetDlgItem(IDC_EDIT_RESULT)->SetWindowText(prefix.c_str());
+		}
+		break;
+		case 2:
+		{
+			enable_client(TRUE);
+		}
+		break;
+		case 3:
+		{
+			OnOK();
+		}
+		break;
+		default:
+			break;
+		}
+
+		return 0;
+	}
 	DECLARE_MESSAGE_MAP()
 
 private:
@@ -125,23 +185,6 @@ private:
 	//
 	int m_nHeightCommand;
 	//
-#define MAX_STR_LEN			100 * 1024 * 1024
-#define CONFIG_FNAME		"config.json"
-
-#define TIMETASK_TIMEOUT	"timetask_timeout"
-#define CURRENT_INDEX		"current_index"
-#define SERVER_LIST			"server_list"
-#define SERVER_DESC			"desc"
-#define SERVER_HOST			"host"
-#define SERVER_PORT			"port"
-#define SERVER_PASS			"pass"
-#define SERVER_SLOT			"slot"
-#define SERVER_CMDS			"cmds"
-#define SERVER_CMDS_CMD		"cmd"
-#define SERVER_CMDS_DESC	"desc"
-
-#define DOC_ALLOCATOR	m_document.GetAllocator()
-
 	void free_redis()
 	{
 		EnterCriticalSection(&m_cslocker);
@@ -158,12 +201,11 @@ private:
 	{
 		int ret = (-1);
 		bool isunix = false;
-		//redisContext* redis_context = NULL;
 		redisReply* redis_reply = NULL;
-		const char* host = m_host.length() ? m_host.c_str() : "10.0.3.252";
-		int port = (m_port > 0 && m_port < 65536) ? m_port : 6379;
+		m_host = m_host.length() ? m_host.c_str() : "10.0.3.252";
+		m_port = (m_port > 0 && m_port < 65536) ? m_port : 6379;
 		const char* pass = m_pass.length() ? m_pass.c_str() : NULL;
-		int slot = (m_slot >= 0) ? m_slot : (0);
+		m_slot = (m_slot >= 0) ? m_slot : (0);
 
 		EnterCriticalSection(&m_cslocker);
 		printf("%s:%d:%s lock\n", __FILE__, __LINE__, __func__);
@@ -171,11 +213,11 @@ private:
 		struct timeval timeout = { 1, 500000 }; // 1.5 seconds
 		if (isunix)
 		{
-			m_redis_context = redisConnectUnixWithTimeout(host, timeout);
+			m_redis_context = redisConnectUnixWithTimeout(m_host.c_str(), timeout);
 		}
 		else
 		{
-			m_redis_context = redisConnectWithTimeout(host, port, timeout);
+			m_redis_context = redisConnectWithTimeout(m_host.c_str(), m_port, timeout);
 		}
 		if ((m_redis_context == NULL) || (m_redis_context->err != 0))
 		{
@@ -195,12 +237,11 @@ private:
 		{
 			if (pass)
 			{
-				//redis_execute_command((std::string("AUTH ") + pass).c_str());
 				redis_login(pass);
 			}
-			if (slot >= 0)
+			if (m_slot >= 0)
 			{
-				((CButton*)GetDlgItem(IDC_CHECK_CLUSTER))->SetCheck(redis_select(slot));
+				PostMessage(WM_USER_NOTIFY, 0, (BOOL)(redis_select(m_slot)));
 			}
 
 			ret = 0;
@@ -208,14 +249,8 @@ private:
 		LeaveCriticalSection(&m_cslocker);
 		printf("%s:%d:%s unlock\n", __FILE__, __LINE__, __func__);
 
-		CString strText = _T("");
-		GetDlgItem(IDC_EDIT_RESULT)->GetWindowText(strText);
-		if (strText.GetLength() > MAX_STR_LEN)
-		{
-			strText = _T("");
-		}
-		std::string prefix = (const char*)strText + std::string("[") + "connected to " + host + ":" + std::to_string(port) + ((ret ==0)?" success":" failed")  + std::string("]") + std::string("\r\n");
-		GetDlgItem(IDC_EDIT_RESULT)->SetWindowText(prefix.c_str());
+		PostMessage(WM_USER_NOTIFY, 1, ret);
+		
 		return ret;
 	}
 	static DWORD redis_status_thread(LPVOID p)
@@ -230,7 +265,7 @@ private:
 				{
 					if (thiz->redis_reinit() == 0)
 					{
-						thiz->enable_client(TRUE);
+						thiz->PostMessage(WM_USER_NOTIFY, 2, 0);
 					}
 				}
 				Sleep(3000);
@@ -245,10 +280,11 @@ private:
 	}
 	void init_ui_text()
 	{
-		SetWindowText(_T("Redis命令行管理工具(支持集群)[xingyun86]"));
+		SetWindowText(_T("Redis命令行管理工具(支持集群)[xingyun86]-V1.0"));
 		SetDlgItemText(IDC_STATIC_COMMAND, _T("命令行:"));
 		SetDlgItemText(IDC_CHECK_CLUSTER, _T("集群"));
 		SetDlgItemText(IDC_CHECK_TIMETASK, _T("定时刷新"));
+		SetDlgItemText(IDC_CHECK_CLEARRESULT, _T("先行清空"));
 		SetDlgItemText(IDC_STATIC_HOST, _T("服务器地址:"));
 		SetDlgItemText(IDC_STATIC_RESULT, _T("执行结果:"));
 
@@ -350,6 +386,13 @@ private:
 		rcClient.right = rcClient.left + rcMiddle.right;
 		rcClient.bottom = rcClient.top + rcMiddle.bottom;
 		GetDlgItem(IDC_CHECK_TIMETASK)->MoveWindow(&rcClient, FALSE);
+
+		GetDlgItem(IDC_CHECK_CLEARRESULT)->GetClientRect(&rcMiddle);
+		rcClient.left = rcClient.right + H_SPACES;
+		rcClient.top = rcClient.top;
+		rcClient.right = rcClient.left + rcMiddle.right;
+		rcClient.bottom = rcClient.top + rcMiddle.bottom;
+		GetDlgItem(IDC_CHECK_CLEARRESULT)->MoveWindow(&rcClient, FALSE);
 
 		GetDlgItem(IDC_EDIT_COMMAND)->GetClientRect(&rcMiddle);
 		rcClient.left = H_BORDER;
@@ -546,59 +589,59 @@ public:
 	}
 	void switch_redis()
 	{
-		int n_current_index = 0;
 		CString strCurrentIndex;
-		((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetLBText(((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel(), strCurrentIndex);
+		int n_current_index = ((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel();
+		((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetLBText(n_current_index, strCurrentIndex);
 
 		rapidjson::Value& server_list = m_document[SERVER_LIST];
-		//for (rapidjson::SizeType i = 0; i < server_list.Size(); i++)
+		rapidjson::Value& server_item = server_list[((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()];
+		if (server_item.HasMember(SERVER_DESC) && server_item[SERVER_DESC].GetType() == rapidjson::kStringType)
 		{
-			rapidjson::Value& server_item = server_list[((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()];
-			if (server_item.HasMember(SERVER_DESC) && server_item[SERVER_DESC].GetType() == rapidjson::kStringType)
+			if (!strcmp((const char *)strCurrentIndex, server_item[SERVER_DESC].GetString()))
 			{
-				if (!strcmp((const char *)strCurrentIndex, server_item[SERVER_DESC].GetString()))
+				free_redis();
+				m_document[CURRENT_INDEX].SetString(strCurrentIndex, DOC_ALLOCATOR);
+				m_host = server_item[SERVER_HOST].GetString();
+				m_port = server_item[SERVER_PORT].GetInt();
+				m_pass = server_item[SERVER_PASS].GetString();
+				m_slot = server_item[SERVER_SLOT].GetInt();
+				if (m_document[SERVER_LIST][n_current_index].HasMember(SERVER_CMDS) &&
+					m_document[SERVER_LIST][n_current_index][SERVER_CMDS].GetType() == rapidjson::kArrayType)
 				{
-					free_redis();
-					m_document[CURRENT_INDEX].SetString(strCurrentIndex, DOC_ALLOCATOR);
-					m_host = server_item[SERVER_HOST].GetString();
-					m_port = server_item[SERVER_PORT].GetInt();
-					m_pass = server_item[SERVER_PASS].GetString();
-					m_slot = server_item[SERVER_SLOT].GetInt();
-					if (m_document[SERVER_LIST][n_current_index].HasMember(SERVER_CMDS) &&
-						m_document[SERVER_LIST][n_current_index][SERVER_CMDS].GetType() == rapidjson::kArrayType)
+					((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->ResetContent();
+					rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][n_current_index][SERVER_CMDS];
+					if (shotcutcommand_list.Size() > 0)
 					{
-						((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->ResetContent();
-						rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][n_current_index][SERVER_CMDS];
-						if (shotcutcommand_list.Size() > 0)
+						for (rapidjson::SizeType j = 0; j < shotcutcommand_list.Size(); j++)
 						{
-							for (rapidjson::SizeType j = 0; j < shotcutcommand_list.Size(); j++)
+							rapidjson::Value& shotcutcommand_item = shotcutcommand_list[j];
+							if (shotcutcommand_item.HasMember(SERVER_CMDS_CMD) && shotcutcommand_item[SERVER_CMDS_CMD].GetType() == rapidjson::kStringType &&
+								shotcutcommand_item.HasMember(SERVER_CMDS_DESC) && shotcutcommand_item[SERVER_CMDS_DESC].GetType() == rapidjson::kStringType)
 							{
-								rapidjson::Value& shotcutcommand_item = shotcutcommand_list[j];
-								if (shotcutcommand_item.HasMember(SERVER_CMDS_CMD) && shotcutcommand_item[SERVER_CMDS_CMD].GetType() == rapidjson::kStringType &&
-									shotcutcommand_item.HasMember(SERVER_CMDS_DESC) && shotcutcommand_item[SERVER_CMDS_DESC].GetType() == rapidjson::kStringType)
-								{
-									((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->InsertString(
-										((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCount(),
-										shotcutcommand_item[SERVER_CMDS_DESC].GetString());
-								}
+								((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->InsertString(
+									((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCount(),
+									shotcutcommand_item[SERVER_CMDS_DESC].GetString());
 							}
+						}
 
-							((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->SetCurSel(0);
+						((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->SetCurSel(0);
+						if (GetDlgItem(IDC_EDIT_COMMAND)->GetWindowTextLength() <= 0)
+						{
 							SetDlgItemText(IDC_EDIT_COMMAND, m_document[SERVER_LIST][n_current_index][SERVER_CMDS][0][SERVER_CMDS_CMD].GetString());
 						}
 					}
-					//init_redis();
-					//break;
 				}
-				n_current_index++;
 			}
+			n_current_index++;
 		}
 	}
 	void switch_cmd()
 	{
 		CString strCurrentIndex;
-		((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetLBText(((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCurSel(), strCurrentIndex);
-		rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel()][SERVER_CMDS];
+		int n_current_index = ((CComboBox*)GetDlgItem(IDC_COMBO_HOST))->GetCurSel();
+		int n_current_cmd_index = ((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetCurSel();
+		rapidjson::Value& shotcutcommand_list = m_document[SERVER_LIST][n_current_index][SERVER_CMDS];
+		((CComboBox*)GetDlgItem(IDC_COMBO_SHOTCUTCOMMAND))->GetLBText(n_current_cmd_index, strCurrentIndex);
 		for (rapidjson::SizeType i = 0; i < shotcutcommand_list.Size(); i++)
 		{
 			rapidjson::Value& shotcutcommand_item = shotcutcommand_list[i];

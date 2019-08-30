@@ -26,6 +26,17 @@ public:
 #endif
 
 	protected:
+		virtual BOOL OnInitDialog() 
+		{
+			SetIcon(GetParent()->GetIcon(TRUE), TRUE);
+			SetIcon(GetParent()->GetIcon(FALSE), FALSE);
+
+			SetWindowText(_T("关于Redis命令行管理工具(支持集群)[xingyun86]-V1.0"));
+			SetDlgItemText(IDC_STATIC_VERSION, _T("Redis命令行管理工具(支持集群), V 1.0"));
+			SetDlgItemText(IDC_STATIC_COPYRIGHT, _T("Copyright (C) 2019"));
+			SetDlgItemText(IDOK, _T("确定"));
+			return FALSE;
+		}
 	virtual void DoDataExchange(CDataExchange* pDX);    // DDX/DDV support
 
 // Implementation
@@ -84,6 +95,7 @@ BEGIN_MESSAGE_MAP(CRedisClusterToolsDlg, CDialogEx)
 	ON_BN_CLICKED(IDC_BUTTON_CLEARRESULT, &CRedisClusterToolsDlg::OnBnClickedButtonClearResult)
 	ON_CBN_SELCHANGE(IDC_COMBO_SHOTCUTCOMMAND, &CRedisClusterToolsDlg::OnCbnSelchangeComboShotcutCommand)
 	ON_BN_CLICKED(IDC_CHECK_TIMETASK, &CRedisClusterToolsDlg::OnBnClickedCheckTimeTask)
+	ON_MESSAGE(WM_USER_NOTIFY, &CRedisClusterToolsDlg::OnUserNotify)
 END_MESSAGE_MAP()
 
 
@@ -105,6 +117,7 @@ BOOL CRedisClusterToolsDlg::OnInitDialog()
 		BOOL bNameValid;
 		CString strAboutMenu;
 		bNameValid = strAboutMenu.LoadString(IDS_ABOUTBOX);
+		strAboutMenu = "关于(&A)...";
 		ASSERT(bNameValid);
 		if (!strAboutMenu.IsEmpty())
 		{
@@ -275,8 +288,7 @@ void CRedisClusterToolsDlg::OnBnClickedCheckTimeTask()
 				thiz->timetask_thread_status(true);
 				while (thiz->timetask_thread_status())
 				{
-					thiz->SetDlgItemText(IDC_EDIT_RESULT, _T(""));
-					thiz->OnOK();
+					thiz->PostMessage(WM_USER_NOTIFY, 3, 0);
 					Sleep(thiz->timetask_timeout());
 				}
 			}
