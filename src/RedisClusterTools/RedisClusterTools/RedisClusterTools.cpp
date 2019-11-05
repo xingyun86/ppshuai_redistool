@@ -37,7 +37,64 @@ CRedisClusterToolsApp theApp;
 
 
 // CRedisClusterToolsApp initialization
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <signal.h>
 
+#include <hiredis.h>
+#include <async.h>
+#include <adapters/libuv.h>
+
+void getCallback(redisAsyncContext* c, void* r, void* privdata) {
+	redisReply* reply = reinterpret_cast<redisReply*>(r);
+	if (reply == NULL) return;
+	printf("argv[%s]: %s\n", (char*)privdata, reply->str);
+
+	/* Disconnect after receiving the reply to GET */
+	redisAsyncDisconnect(c);
+}
+
+void connectCallback(const redisAsyncContext* c, int status) {
+	if (status != REDIS_OK) {
+		printf("Error: %s\n", c->errstr);
+		return;
+	}
+	printf("Connected...\n");
+}
+
+void disconnectCallback(const redisAsyncContext* c, int status) {
+	if (status != REDIS_OK) {
+		printf("Error: %s\n", c->errstr);
+		return;
+	}
+	printf("Disconnected...\n");
+}
+
+int test_main(int argc, char** argv) {
+	//signal(SIGPIPE, SIG_IGN);
+	uv_loop_t* loop = uv_default_loop();
+
+	redisAsyncContext* c = redisAsyncConnect("10.0.3.252", 6379);
+	if (c->err)
+	{
+		/* Let *c leak for now... */
+		printf("Error: %s\n", c->errstr);
+		return 1;
+	}
+
+	redisLibuvAttach(c, loop);
+	redisAsyncSetConnectCallback(c, connectCallback);
+	redisAsyncSetDisconnectCallback(c, disconnectCallback);
+	redisAsyncCommand(c, [](redisAsyncContext* c, void* r, void* privdata) {
+			redisReply* reply = reinterpret_cast<redisReply*>(r);
+			if (reply == NULL) return;
+			printf("argv[%s]: %s\n", (char*)privdata, reply->str);
+		}, NULL, "SET key %b", argv[argc - 1], strlen(argv[argc - 1]));
+	redisAsyncCommand(c, getCallback, (char*)"end-1", "GET key");
+	uv_run(loop, UV_RUN_DEFAULT);
+	return 0;
+}
 BOOL CRedisClusterToolsApp::InitInstance()
 {
 	// InitCommonControlsEx() is required on Windows XP if an application
@@ -72,7 +129,23 @@ BOOL CRedisClusterToolsApp::InitInstance()
 	SetRegistryKey(_T("Local AppWizard-Generated Applications"));
 
 #if defined(_DEBUG) || defined(DEBUG)
-	FILE * pStdIn = NULL;
+	/*FILE * pStdIn = NULL;
+	FILE* pStdOut = NULL;
+	FILE* pStdErr = NULL;
+	if (AllocConsole())
+	{
+		pStdIn = _tfreopen(_T("CONIN$"), _T("rb"), stdin);
+		pStdOut = _tfreopen(_T("CONOUT$"), _T("wb"), stdout);
+		pStdErr = _tfreopen(_T("CONOUT$"), _T("wb"), stderr);
+	}*/
+	{
+		test_main(0,0);
+	}
+	return FALSE;
+#else
+	//no op
+
+	FILE* pStdIn = NULL;
 	FILE* pStdOut = NULL;
 	FILE* pStdErr = NULL;
 	if (AllocConsole())
@@ -81,8 +154,11 @@ BOOL CRedisClusterToolsApp::InitInstance()
 		pStdOut = _tfreopen(_T("CONOUT$"), _T("wb"), stdout);
 		pStdErr = _tfreopen(_T("CONOUT$"), _T("wb"), stderr);
 	}
-#else
-	//no op
+	{
+		test_main(0, 0);
+	}
+	getchar();
+	return FALSE;
 #endif
 
 	CRedisClusterToolsDlg dlg;
@@ -105,7 +181,7 @@ BOOL CRedisClusterToolsApp::InitInstance()
 	}
 
 #if defined(_DEBUG) || defined(DEBUG)
-	if (FreeConsole())
+	/*if (FreeConsole())
 	{
 		if (pStdIn)
 		{
@@ -122,7 +198,7 @@ BOOL CRedisClusterToolsApp::InitInstance()
 			fclose(pStdErr);
 			pStdErr = NULL;
 		}
-	}
+	}*/
 #else
 	//no op
 #endif
